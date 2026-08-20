@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore, doc, getDocFromServer } from "firebase/firestore";
 import firebaseConfigJson from "../../firebase-applet-config.json";
 
 const app = initializeApp({
@@ -14,7 +14,24 @@ const app = initializeApp({
 }, "splendid-medref-app");
 
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfigJson.firestoreDatabaseId || undefined);
+
+const dbId = firebaseConfigJson.firestoreDatabaseId || "(default)";
+
+export const db = initializeFirestore(app, {
+  experimentalAutoDetectLongPolling: true,
+}, dbId);
+
+// Test connection on boot gracefully
+async function testFirestoreConnection() {
+  try {
+    await getDocFromServer(doc(db, '_health', 'check'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn("Firestore operating in offline/cached mode.");
+    }
+  }
+}
+testFirestoreConnection();
 
 export async function ensureAnonymousAuth(): Promise<{ uid: string }> {
   if (auth.currentUser) {
@@ -31,3 +48,4 @@ export async function ensureAnonymousAuth(): Promise<{ uid: string }> {
     return { uid: "user_default_session" };
   }
 }
+
