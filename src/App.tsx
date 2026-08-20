@@ -42,6 +42,7 @@ import { showToast } from "./components/Toast";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { ClinicalCalculators } from "./components/ClinicalCalculators";
 import { DrugInteractionGraph } from "./components/DrugInteractionGraph";
+import { fetchDirectMedicationData } from "./lib/medicationService";
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -194,23 +195,35 @@ export default function App() {
       setApiLoading(true);
       setApiError(null);
       try {
-        const response = await fetch(`/api/medication?name=${encodeURIComponent(liveDrugName)}`);
-        const text = await response.text();
-        let json;
+        let json: any = null;
         try {
-          json = JSON.parse(text);
-        } catch (e) {
-          throw new Error("API Gateway returned invalid format.");
+          const response = await fetch(`/api/medication?name=${encodeURIComponent(liveDrugName)}`);
+          const text = await response.text();
+          const isHtml = text.trim().startsWith("<");
+          
+          if (response.ok && !isHtml) {
+            json = JSON.parse(text);
+          }
+        } catch {
+          json = null;
         }
-        if (!response.ok) {
-          throw new Error(json.error || "Failed to fetch drug data");
+
+        if (!json) {
+          // Fallback to direct client-side open API query (RxNorm + openFDA + MedlinePlus)
+          json = await fetchDirectMedicationData(liveDrugName);
         }
-        if (isCurrent) {
+
+        if (isCurrent && json) {
           setApiData(json);
         }
       } catch (err) {
         if (isCurrent) {
-          setApiError(err instanceof Error ? err.message : "Failed to connect to gateway");
+          try {
+            const fallbackData = await fetchDirectMedicationData(liveDrugName);
+            setApiData(fallbackData);
+          } catch (fallbackErr) {
+            setApiError(err instanceof Error ? err.message : "Failed to connect to gateway");
+          }
         }
       } finally {
         if (isCurrent) {
@@ -515,9 +528,15 @@ export default function App() {
                     setIcdLoading(true);
                     try {
                       const res = await fetch(`/api/icd/search?q=${encodeURIComponent(icdQuery)}`);
-                      const data = await res.json();
+                      const text = await res.text();
+                      if (text.trim().startsWith("<")) {
+                        showToast("WHO ICD API endpoint returned HTML. Ensure server environment is configured.", "⚠️", "warning");
+                        setIcdResults([]);
+                        return;
+                      }
+                      const data = JSON.parse(text);
                       if (!res.ok) {
-                        alert(data.error || "Search failed.");
+                        showToast(data.error || "ICD-11 search failed", "🚨", "error");
                         setIcdResults([]);
                         return;
                       }
