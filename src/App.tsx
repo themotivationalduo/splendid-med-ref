@@ -1869,16 +1869,16 @@ export default function App() {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 40, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-white/75 backdrop-blur-md border border-white/40 shadow-xl shadow-slate-900/10 rounded-full px-2.5 py-1.5 flex items-center gap-1"
+            className="fixed bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-40 bg-white/80 dark:bg-slate-900/85 backdrop-blur-xl border border-white/50 dark:border-slate-700/80 shadow-2xl shadow-slate-900/15 dark:shadow-black/40 rounded-full p-1 flex items-center gap-0.5 max-w-[92vw] overflow-x-auto no-scrollbar"
           >
             {[
-              { id: 'dictionary', label: 'Dictionary', emoji: '📚', title: 'Medical Dictionary' },
-              { id: 'foundations', label: 'Foundations', emoji: '🏛️', title: 'Foundational Medical Sciences' },
-              { id: 'pathology', label: 'Pathology', emoji: '🩺', title: 'Pathology Index' },
-              { id: 'pharmacology', label: 'Pharmacology', emoji: '💊', title: 'Pharmacology & Interaction Graph' },
-              { id: 'diagnostics', label: 'Diagnostics', emoji: '📋', title: 'Diagnostics & Anatomy' },
-              { id: 'tools', label: 'Tools', emoji: '🧮', title: 'Clinical Calculators & Tools' },
-              { id: 'bookmarks', label: 'Bookmarks', emoji: '⭐', title: 'Saved Bookmarks' },
+              { id: 'dictionary', label: 'Dictionary', shortLabel: 'Dict', emoji: '📚', title: 'Medical Dictionary' },
+              { id: 'foundations', label: 'Foundations', shortLabel: 'Found', emoji: '🏛️', title: 'Foundational Medical Sciences' },
+              { id: 'pathology', label: 'Pathology', shortLabel: 'Path', emoji: '🩺', title: 'Pathology Index' },
+              { id: 'pharmacology', label: 'Pharmacology', shortLabel: 'Pharm', emoji: '💊', title: 'Pharmacology & Interaction Graph' },
+              { id: 'diagnostics', label: 'Diagnostics', shortLabel: 'Diag', emoji: '📋', title: 'Diagnostics & Anatomy' },
+              { id: 'tools', label: 'Tools', shortLabel: 'Tools', emoji: '🧮', title: 'Clinical Calculators & Tools' },
+              { id: 'bookmarks', label: 'Bookmarks', shortLabel: 'Saved', emoji: '⭐', title: 'Saved Bookmarks' },
             ].map(tab => {
               const isActive = activeNavTab === tab.id;
               return (
@@ -1888,14 +1888,17 @@ export default function App() {
                     navigateToTab(tab.id as any);
                     showToast(`Navigated to ${tab.title}`, tab.emoji, "info");
                   }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold transition-all ${
+                  title={tab.title}
+                  className={`flex items-center gap-1 px-2 py-1 sm:px-2.5 rounded-full text-[10px] sm:text-[11px] font-bold transition-all whitespace-nowrap shrink-0 ${
                     isActive
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30 dark:bg-blue-600 dark:text-white'
+                      : 'text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-800/60'
                   }`}
                 >
-                  <span className="text-sm">{tab.emoji}</span>
-                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span className="text-xs">{tab.emoji}</span>
+                  <span className={`text-[10px] sm:text-[11px] font-bold ${isActive ? 'inline' : 'hidden sm:inline'}`}>
+                    {tab.shortLabel}
+                  </span>
                 </button>
               );
             })}
