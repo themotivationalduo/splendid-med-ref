@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import * as d3 from 'd3';
+import { SynergisticSideEffectsChart } from './SynergisticSideEffectsChart';
 import {
   Network,
   ZoomIn,
@@ -1463,6 +1464,9 @@ export function DrugInteractionGraph({
           ))}
         </div>
       </div>
+
+      {/* Synergistic Side Effects Comparative Bar Chart (D3 Visualizer) */}
+      <SynergisticSideEffectsChart drugList={regimen} />
 
       {/* Inspector Panel for Selected Node / Interaction Edge */}
       {(selectedLink || selectedNode) && (
