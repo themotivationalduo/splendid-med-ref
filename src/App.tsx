@@ -19,6 +19,7 @@ import {
   Database,
   Bookmark,
   Printer,
+  Download,
   FileText,
   Layers,
   Heart,
@@ -75,6 +76,60 @@ export default function App() {
       document.documentElement.classList.remove("dark");
     }
   }, [isDarkMode]);
+
+  // PWA Direct Installation Handler
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstalled, setIsInstalled] = useState<boolean>(() => {
+    try {
+      return window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+      showToast("Splendid Med-Ref successfully installed!", "📱", "success");
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallApp = useCallback(async () => {
+    if (deferredPrompt) {
+      showToast("Launching app installer...", "📲", "info");
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        showToast("App installed successfully!", "📱", "success");
+      } else {
+        showToast("Installation cancelled", "ℹ️", "info");
+      }
+      setDeferredPrompt(null);
+    } else if (isInstalled) {
+      showToast("App is already installed on your device!", "✅", "success");
+    } else {
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+      if (isIOS) {
+        showToast("To install on iOS: tap Share icon then 'Add to Home Screen'", "📲", "info", 5000);
+      } else {
+        showToast("Direct installation prompt initialized! Tap browser menu -> 'Install App' if needed.", "📲", "info", 4000);
+      }
+    }
+  }, [deferredPrompt, isInstalled]);
 
   const [activeNavTab, setActiveNavTab] = useState<"dictionary" | "foundations" | "pathology" | "pharmacology" | "diagnostics" | "tools" | "bookmarks">("dictionary");
   const [navVisible, setNavVisible] = useState(true);
@@ -404,14 +459,14 @@ export default function App() {
             )}
           </button>
 
-          {/* Export PDF Button */}
+          {/* Direct App Installation Button */}
           <button 
-            onClick={handlePrintSummary}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-600/90 hover:bg-blue-600 text-white text-[11px] font-semibold rounded-lg transition-colors border border-blue-500/50 shadow-2xs"
-            title="Export / Print Summary Sheet"
+            onClick={handleInstallApp}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600/90 hover:bg-emerald-600 text-white text-[11px] font-semibold rounded-lg transition-colors border border-emerald-500/50 shadow-2xs cursor-pointer"
+            title="Install Splendid Med-Ref App"
           >
-            <Printer className="w-3.5 h-3.5 text-white" />
-            <span className="hidden sm:inline">Export PDF</span>
+            <Download className="w-3.5 h-3.5 text-white animate-bounce-slow" />
+            <span className="hidden sm:inline">{isInstalled ? "Installed" : "Install App"}</span>
           </button>
         </div>
       </header>
