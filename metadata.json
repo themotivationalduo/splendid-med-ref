@@ -1,0 +1,6 @@
+{
+  "name": "Splendid Med-Ref",
+  "description": "Unified clinical intelligence platform and medication reference base.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
