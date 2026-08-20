@@ -43,6 +43,11 @@ import { showToast } from "./components/Toast";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { ClinicalCalculators } from "./components/ClinicalCalculators";
 import { DrugInteractionGraph } from "./components/DrugInteractionGraph";
+import {
+  PharmacologySkeletonLoader,
+  DictionaryGridSkeletonLoader,
+  IcdSearchSkeletonLoader
+} from "./components/SkeletonLoaders";
 import { fetchDirectMedicationData } from "./lib/medicationService";
 
 export default function App() {
@@ -131,7 +136,48 @@ export default function App() {
     }
   }, [deferredPrompt, isInstalled]);
 
-  const [activeNavTab, setActiveNavTab] = useState<"dictionary" | "foundations" | "pathology" | "pharmacology" | "diagnostics" | "tools" | "bookmarks">("dictionary");
+  type NavTab = "dictionary" | "foundations" | "pathology" | "pharmacology" | "diagnostics" | "tools" | "bookmarks";
+
+  const getTabFromPath = (path: string): NavTab => {
+    const clean = path.toLowerCase().replace(/^\/+|\/+$/g, '');
+    if (clean === "pharmacology") return "pharmacology";
+    if (clean === "foundations") return "foundations";
+    if (clean === "pathology") return "pathology";
+    if (clean === "diagnostics") return "diagnostics";
+    if (clean === "tools") return "tools";
+    if (clean === "bookmarks") return "bookmarks";
+    if (clean === "dictionary") return "dictionary";
+    return "dictionary";
+  };
+
+  const [activeNavTab, setActiveNavTab] = useState<NavTab>(() => {
+    return getTabFromPath(window.location.pathname);
+  });
+
+  const navigateToTab = useCallback((tab: NavTab, pushHistory = true) => {
+    setActiveNavTab(tab);
+    const targetPath = `/${tab}`;
+    if (pushHistory && window.location.pathname !== targetPath) {
+      window.history.pushState({ tab }, '', targetPath);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const tabFromUrl = getTabFromPath(window.location.pathname);
+      setActiveNavTab(tabFromUrl);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    const currentTab = getTabFromPath(window.location.pathname);
+    const targetPath = `/${currentTab}`;
+    if (window.location.pathname !== targetPath) {
+      window.history.replaceState({ tab: currentTab }, '', targetPath);
+    }
+  }, []);
   const [navVisible, setNavVisible] = useState(true);
   const lastScrollY = useRef(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -140,6 +186,16 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedEntity, setSelectedEntity] = useState<MedicalEntity | null>(null);
+  const [isDictionarySearching, setIsDictionarySearching] = useState(false);
+
+  // Transient skeleton loading effect on search query or category filter change
+  useEffect(() => {
+    setIsDictionarySearching(true);
+    const timer = setTimeout(() => {
+      setIsDictionarySearching(false);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [searchTerm, selectedCategory]);
 
   // Recent Searches / Viewed Entities State
   const [recentEntityIds, setRecentEntityIds] = useState<string[]>(() => {
@@ -189,6 +245,41 @@ export default function App() {
   const [apiData, setApiData] = useState<UnifiedMedicalData | null>(null);
   const [apiLoading, setApiLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // Polypharmacy Multi-Drug Regimen & Patient Physiological State
+  const [patientAge, setPatientAge] = useState<number>(72);
+  const [patientWeight, setPatientWeight] = useState<number>(62);
+
+  const [polypharmacyRegimen, setPolypharmacyRegimen] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('splendid_polypharmacy_regimen');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      // ignore
+    }
+    return ["Warfarin", "Aspirin", "Ibuprofen", "Lisinopril", "Metformin"];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('splendid_polypharmacy_regimen', JSON.stringify(polypharmacyRegimen));
+    } catch (e) {
+      // ignore
+    }
+  }, [polypharmacyRegimen]);
+
+  // Dynamically ensure looked-up drug is in polypharmacy regimen
+  useEffect(() => {
+    if (liveDrugName) {
+      setPolypharmacyRegimen(prev => {
+        const exists = prev.some(d => d.toLowerCase() === liveDrugName.toLowerCase());
+        if (!exists) {
+          return [liveDrugName, ...prev];
+        }
+        return prev;
+      });
+    }
+  }, [liveDrugName]);
 
   // Anonymous Auth & Firestore State
   const [currentUserUid, setCurrentUserUid] = useState<string | null>(null);
@@ -620,7 +711,9 @@ export default function App() {
                     </button>
                   </form>
 
-                  {icdResults.length > 0 && (
+                  {icdLoading ? (
+                    <IcdSearchSkeletonLoader />
+                  ) : icdResults.length > 0 ? (
                     <div className="bg-white dark:bg-slate-900 rounded-lg border border-blue-200 dark:border-slate-700 p-2.5 max-h-48 overflow-y-auto space-y-2">
                       <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">WHO ICD-11 Search Results ({icdResults.length})</div>
                       {icdResults.map((item: any, idx: number) => (
@@ -635,7 +728,7 @@ export default function App() {
                         </div>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 {/* Category Dropdown & Pills */}
@@ -696,51 +789,61 @@ export default function App() {
               </div>
 
               {/* Entity Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {filteredEntities.map((entity) => {
-                  const isBookmarked = bookmarks.includes(entity.id);
-                  return (
-                    <div
-                      key={entity.id}
-                      onClick={() => setSelectedEntity(entity)}
-                      className="bg-white/85 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200/85 dark:border-slate-800/80 rounded-xl p-3.5 shadow-2xs hover:shadow-md hover:border-blue-300 dark:hover:border-blue-500/50 transition-all cursor-pointer flex flex-col justify-between group text-slate-900 dark:text-slate-100"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
-                            entity.category === 'disease' ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-900/50' :
-                            entity.category === 'drug' ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-900/50' :
-                            entity.category === 'anatomy' ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-900/50' :
-                            entity.category === 'diagnostic' ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-100 dark:border-purple-900/50' :
-                            'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-900/50'
-                          }`}>
-                            {entity.category}
-                          </span>
-                          <button
-                            onClick={(e) => toggleBookmark(entity.id, e)}
-                            className={`p-1 rounded-md transition-colors ${isBookmarked ? 'text-amber-500 bg-amber-50 dark:bg-amber-950/50' : 'text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-300'}`}
-                          >
-                            <Bookmark className={`w-3 h-3 ${isBookmarked ? 'fill-current' : ''}`} />
-                          </button>
+              {isDictionarySearching ? (
+                <DictionaryGridSkeletonLoader count={6} />
+              ) : filteredEntities.length === 0 ? (
+                <div className="bg-white/80 dark:bg-slate-900/80 rounded-xl p-8 text-center space-y-2 border border-slate-200 dark:border-slate-800">
+                  <BookOpen className="w-8 h-8 text-slate-400 mx-auto" />
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">No medical terms found</p>
+                  <p className="text-xs text-slate-500">Try adjusting your search query or selecting "All Categories".</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {filteredEntities.map((entity) => {
+                    const isBookmarked = bookmarks.includes(entity.id);
+                    return (
+                      <div
+                        key={entity.id}
+                        onClick={() => setSelectedEntity(entity)}
+                        className="bg-white/85 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200/85 dark:border-slate-800/80 rounded-xl p-3.5 shadow-2xs hover:shadow-md hover:border-blue-300 dark:hover:border-blue-500/50 transition-all cursor-pointer flex flex-col justify-between group text-slate-900 dark:text-slate-100"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                              entity.category === 'disease' ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-900/50' :
+                              entity.category === 'drug' ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-900/50' :
+                              entity.category === 'anatomy' ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-900/50' :
+                              entity.category === 'diagnostic' ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-100 dark:border-purple-900/50' :
+                              'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-900/50'
+                            }`}>
+                              {entity.category}
+                            </span>
+                            <button
+                              onClick={(e) => toggleBookmark(entity.id, e)}
+                              className={`p-1 rounded-md transition-colors ${isBookmarked ? 'text-amber-500 bg-amber-50 dark:bg-amber-950/50' : 'text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-300'}`}
+                            >
+                              <Bookmark className={`w-3 h-3 ${isBookmarked ? 'fill-current' : ''}`} />
+                            </button>
+                          </div>
+                          <h3 className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors mb-1">
+                            {entity.title}
+                          </h3>
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-3 leading-relaxed">
+                            {entity.summary}
+                          </p>
                         </div>
-                        <h3 className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors mb-1">
-                          {entity.title}
-                        </h3>
-                        <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-3 leading-relaxed">
-                          {entity.summary}
-                        </p>
-                      </div>
 
-                      <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] font-medium text-slate-500 dark:text-slate-400">
-                        <span className="font-mono text-slate-400 dark:text-slate-500">{entity.icdCode || entity.rxcui ? `Code: ${entity.icdCode || entity.rxcui}` : 'Standard Profile'}</span>
-                        <span className="text-blue-600 dark:text-blue-400 group-hover:translate-x-0.5 transition-transform flex items-center gap-1 font-semibold">
-                          View Guide <ChevronRight className="w-3 h-3" />
-                        </span>
+                        <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                          <span className="font-mono text-slate-400 dark:text-slate-500">{entity.icdCode || entity.rxcui ? `Code: ${entity.icdCode || entity.rxcui}` : 'Standard Profile'}</span>
+                          <span className="text-blue-600 dark:text-blue-400 group-hover:translate-x-0.5 transition-transform flex items-center gap-1 font-semibold">
+                            View Guide <ChevronRight className="w-3 h-3" />
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-               </div>
+                    );
+                  })}
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -1309,10 +1412,7 @@ export default function App() {
                   </div>
 
                 {apiLoading ? (
-                  <div className="py-12 text-center space-y-2">
-                    <div className="w-8 h-8 border-3 border-emerald-100 border-t-emerald-500 rounded-full animate-spin mx-auto" />
-                    <p className="text-[11px] text-slate-500 font-medium">Loading clinical data...</p>
-                  </div>
+                  <PharmacologySkeletonLoader />
                 ) : apiError ? (
                   <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-center text-red-700 text-xs">
                     {apiError}
@@ -1374,7 +1474,17 @@ export default function App() {
                     </div>
 
                     {/* D3.js Force-Directed Interaction Network Graph */}
-                    <DrugInteractionGraph initialDrug={liveDrugName} />
+                    <DrugInteractionGraph 
+                      initialDrug={liveDrugName} 
+                      drugList={polypharmacyRegimen}
+                      onDrugListChange={setPolypharmacyRegimen}
+                      patientAge={patientAge}
+                      patientWeight={patientWeight}
+                      onPatientMetricsChange={({ age, weight }) => {
+                        setPatientAge(age);
+                        setPatientWeight(weight);
+                      }}
+                    />
 
                     {/* Clinical Records Section */}
                     {apiData.fhirResources && (
@@ -1566,7 +1676,7 @@ export default function App() {
                             <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-700 flex justify-between items-center text-[11px]">
                               <span className="font-mono text-slate-400 dark:text-slate-500 text-[10px]">{entity.icdCode || entity.rxcui || 'Clinical Guide'}</span>
                               <button 
-                                onClick={() => { setSelectedEntity(entity); setActiveNavTab("dictionary"); }}
+                                onClick={() => { setSelectedEntity(entity); navigateToTab("dictionary"); }}
                                 className="text-blue-600 dark:text-blue-400 font-semibold hover:underline flex items-center gap-1 text-[11px]"
                               >
                                 Open Profile <ChevronRight className="w-3 h-3" />
@@ -1775,7 +1885,7 @@ export default function App() {
                 <button
                   key={tab.id}
                   onClick={() => {
-                    setActiveNavTab(tab.id as any);
+                    navigateToTab(tab.id as any);
                     showToast(`Navigated to ${tab.title}`, tab.emoji, "info");
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold transition-all ${
