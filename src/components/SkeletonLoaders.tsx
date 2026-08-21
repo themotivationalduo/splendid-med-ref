@@ -166,3 +166,78 @@ export const IcdSearchSkeletonLoader: React.FC = () => {
     </div>
   );
 };
+
+// 4. PATHOLOGY DISEASE PROFILE SKELETON LOADER
+export const PathologyProfileSkeletonLoader: React.FC = () => {
+  return (
+    <div className="w-full bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl border border-white/60 dark:border-slate-800/80 rounded-xl p-5 shadow-sm space-y-5 animate-fade-in" aria-label="Loading Pathology Disease Profile">
+      {/* Header & Title Skeleton */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 dark:border-slate-800 pb-4">
+        <div className="space-y-2.5 w-full sm:w-2/3">
+          <div className="flex items-center gap-2">
+            <SkeletonPulse className="h-4 w-28 rounded-md bg-blue-100 dark:bg-blue-950" />
+            <SkeletonPulse className="h-4 w-20 rounded-md" />
+          </div>
+          <SkeletonPulse className="h-6 w-3/4" />
+          <SkeletonPulse className="h-3.5 w-full" />
+          <SkeletonPulse className="h-3.5 w-5/6" />
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <SkeletonPulse className="h-8 w-20 rounded-lg" />
+          <SkeletonPulse className="h-8 w-16 rounded-lg" />
+        </div>
+      </div>
+
+      {/* Metric Cards Skeleton */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+            <SkeletonPulse className="h-2.5 w-20 bg-slate-300 dark:bg-slate-700" />
+            <SkeletonPulse className="h-4 w-28 bg-blue-200 dark:bg-blue-900/60" />
+          </div>
+        ))}
+      </div>
+
+      {/* Pathophysiology & Overview Card Skeleton */}
+      <div className="p-4 bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3 shadow-2xs">
+        <div className="flex items-center gap-2">
+          <SkeletonPulse className="w-4 h-4 rounded-full bg-blue-500/40" />
+          <SkeletonPulse className="h-4 w-52" />
+        </div>
+        <div className="space-y-2 pt-1">
+          <SkeletonPulse className="h-3.5 w-full" />
+          <SkeletonPulse className="h-3.5 w-11/12" />
+          <SkeletonPulse className="h-3.5 w-4/5" />
+        </div>
+      </div>
+
+      {/* Clinical Symptoms Chips Skeleton */}
+      <div className="p-4 bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3 shadow-2xs">
+        <div className="flex items-center gap-2">
+          <SkeletonPulse className="w-4 h-4 rounded-full bg-rose-500/40" />
+          <SkeletonPulse className="h-4 w-44" />
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <SkeletonPulse className="h-6 w-28 rounded-lg bg-rose-100/70 dark:bg-rose-950/40" />
+          <SkeletonPulse className="h-6 w-36 rounded-lg bg-rose-100/70 dark:bg-rose-950/40" />
+          <SkeletonPulse className="h-6 w-24 rounded-lg bg-rose-100/70 dark:bg-rose-950/40" />
+          <SkeletonPulse className="h-6 w-32 rounded-lg bg-rose-100/70 dark:bg-rose-950/40" />
+        </div>
+      </div>
+
+      {/* Diagnostic & Treatment Grid Skeleton */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="p-4 bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-2">
+          <SkeletonPulse className="h-4 w-40" />
+          <SkeletonPulse className="h-3.5 w-full" />
+          <SkeletonPulse className="h-3.5 w-4/5" />
+        </div>
+        <div className="p-4 bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-2">
+          <SkeletonPulse className="h-4 w-40" />
+          <SkeletonPulse className="h-3.5 w-full" />
+          <SkeletonPulse className="h-3.5 w-4/5" />
+        </div>
+      </div>
+    </div>
+  );
+};

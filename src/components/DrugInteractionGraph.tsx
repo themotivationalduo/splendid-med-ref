@@ -63,6 +63,7 @@ export interface DrugInteractionGraphProps {
   patientAge?: number;
   patientWeight?: number;
   onPatientMetricsChange?: (metrics: { age: number; weight: number }) => void;
+  allergies?: string[];
 }
 
 // Comprehensive Drug Metadata Database
@@ -561,7 +562,8 @@ export function DrugInteractionGraph({
   onDrugListChange,
   patientAge = 72,
   patientWeight = 62,
-  onPatientMetricsChange
+  onPatientMetricsChange,
+  allergies = []
 }: DrugInteractionGraphProps) {
   // Patient Physiological Markers State
   const [age, setAge] = useState<number>(patientAge);
@@ -1257,11 +1259,54 @@ export function DrugInteractionGraph({
         <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-200/60 dark:border-slate-800">
           {regimen.map(drug => {
             const alert = evaluatePhysiologicalAdjustments(drug, age, weight);
+            
+            // Check cross-sensitivity against patient allergies
+            const dLower = drug.toLowerCase().trim();
+            const NSAID_DRUGS = ["ibuprofen", "aspirin", "naproxen", "meloxicam", "diclofenac", "acetaminophen"];
+            const ACEI_DRUGS = ["lisinopril", "losartan", "valsartan", "enalapril", "captopril", "spironolactone"];
+            const ANTICOAGULANTS = ["warfarin", "heparin", "apixaban", "rivaroxaban", "dabigatran"];
+            
+            let allergyConflict: string | null = null;
+            for (const allergy of allergies) {
+              const aLower = allergy.toLowerCase().trim();
+              if (dLower === aLower || dLower.includes(aLower) || aLower.includes(dLower)) {
+                allergyConflict = `Direct conflict with patient's allergy to "${allergy}"`;
+                break;
+              }
+              if (aLower === "nsaid" || aLower === "nsaids") {
+                if (NSAID_DRUGS.includes(dLower)) {
+                  allergyConflict = `Cross-sensitivity conflict: ${drug} is an NSAID`;
+                  break;
+                }
+              }
+              if (aLower === "ace inhibitor" || aLower === "ace inhibitors" || aLower === "acei" || aLower === "arb" || aLower === "arbs" || aLower === "lisinopril") {
+                if (ACEI_DRUGS.includes(dLower)) {
+                  allergyConflict = `Cross-sensitivity conflict: ${drug} is an ACE Inhibitor / ARB`;
+                  break;
+                }
+              }
+              if (aLower === "sulfa" || aLower === "sulfa drugs" || aLower === "sulfonamides") {
+                if (dLower.includes("sulfa") || dLower === "furosemide" || dLower === "hydrochlorothiazide") {
+                  allergyConflict = `Cross-sensitivity conflict: ${drug} contains a cross-reactive sulfonamide chemical structure`;
+                  break;
+                }
+              }
+              if (aLower === "anticoagulants" || aLower === "anticoagulant" || aLower === "warfarin") {
+                if (ANTICOAGULANTS.includes(dLower)) {
+                  allergyConflict = `Cross-sensitivity conflict: ${drug} is an anticoagulant`;
+                  break;
+                }
+              }
+            }
+
             return (
               <span
                 key={drug}
+                title={allergyConflict ? `⚠️ PATIENT ALLERGY: ${allergyConflict}` : undefined}
                 className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold shadow-2xs transition-all ${
-                  alert.type === 'contraindicated'
+                  allergyConflict
+                    ? 'bg-rose-100 text-rose-950 border border-rose-400 dark:bg-rose-950/70 dark:text-rose-200 dark:border-rose-800 ring-2 ring-rose-500 animate-pulse font-mono'
+                    : alert.type === 'contraindicated'
                     ? 'bg-rose-100 text-rose-900 border border-rose-300 dark:bg-rose-950 dark:text-rose-200 dark:border-rose-800 ring-2 ring-rose-500'
                     : alert.type === 'dose_reduction'
                     ? 'bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800'
@@ -1275,8 +1320,9 @@ export function DrugInteractionGraph({
                   className="hover:underline cursor-pointer flex items-center gap-1"
                 >
                   <span>{drug}</span>
-                  {alert.type === 'contraindicated' && <span>🚫</span>}
-                  {alert.type === 'dose_reduction' && <span>⚠️</span>}
+                  {allergyConflict && <span title={allergyConflict}>🚨</span>}
+                  {!allergyConflict && alert.type === 'contraindicated' && <span>🚫</span>}
+                  {!allergyConflict && alert.type === 'dose_reduction' && <span>⚠️</span>}
                 </button>
                 {regimen.length > 1 && (
                   <button

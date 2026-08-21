@@ -46,7 +46,8 @@ import { DrugInteractionGraph } from "./components/DrugInteractionGraph";
 import {
   PharmacologySkeletonLoader,
   DictionaryGridSkeletonLoader,
-  IcdSearchSkeletonLoader
+  IcdSearchSkeletonLoader,
+  PathologyProfileSkeletonLoader
 } from "./components/SkeletonLoaders";
 import { fetchDirectMedicationData } from "./lib/medicationService";
 
@@ -56,7 +57,7 @@ export default function App() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false);
-    }, 900);
+    }, 3000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -231,6 +232,16 @@ export default function App() {
   const [selectedFoundationCategory, setSelectedFoundationCategory] = useState("all");
 
   const [pathologySearch, setPathologySearch] = useState("");
+  const [isPathologyLoading, setIsPathologyLoading] = useState(false);
+
+  // Transient subtle skeleton screen effect when switching disease entities or search
+  useEffect(() => {
+    setIsPathologyLoading(true);
+    const timer = setTimeout(() => {
+      setIsPathologyLoading(false);
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [selectedEntity?.id, pathologySearch]);
 
   const [drugSearch, setDrugSearch] = useState("");
   
@@ -250,6 +261,31 @@ export default function App() {
   const [patientAge, setPatientAge] = useState<number>(72);
   const [patientWeight, setPatientWeight] = useState<number>(62);
 
+  const [allergies, setAllergies] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('splendid_patient_allergies');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      // ignore
+    }
+    return ["Sulfa drugs", "Ibuprofen"];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('splendid_patient_allergies', JSON.stringify(allergies));
+    } catch (e) {
+      // ignore
+    }
+  }, [allergies]);
+
+  const [newAllergy, setNewAllergy] = useState("");
+
+  const [shakeTrigger, setShakeTrigger] = useState(0);
+  const [pulseTrigger, setPulseTrigger] = useState(0);
+  const prevConflictsCount = useRef(-1);
+  const prevRegimenLength = useRef(-1);
+
   const [polypharmacyRegimen, setPolypharmacyRegimen] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('splendid_polypharmacy_regimen');
@@ -259,6 +295,85 @@ export default function App() {
     }
     return ["Warfarin", "Aspirin", "Ibuprofen", "Lisinopril", "Metformin"];
   });
+
+  useEffect(() => {
+    // Determine the conflicts count dynamically to avoid dependencies lag
+    const NSAID_DRUGS = ["ibuprofen", "aspirin", "naproxen", "meloxicam", "diclofenac", "acetaminophen"];
+    const ACEI_DRUGS = ["lisinopril", "losartan", "valsartan", "enalapril", "captopril", "spironolactone"];
+    const ANTICOAGULANTS = ["warfarin", "heparin", "apixaban", "rivaroxaban", "dabigatran"];
+    
+    let currentConflicts = 0;
+    polypharmacyRegimen.forEach(drug => {
+      const dLower = drug.toLowerCase().trim();
+      allergies.forEach(allergy => {
+        const aLower = allergy.toLowerCase().trim();
+        if (dLower === aLower || dLower.includes(aLower) || aLower.includes(dLower)) {
+          currentConflicts++;
+          return;
+        }
+        if (aLower === "nsaid" || aLower === "nsaids") {
+          if (NSAID_DRUGS.includes(dLower)) {
+            currentConflicts++;
+          }
+        }
+        if (aLower === "ace inhibitor" || aLower === "ace inhibitors" || aLower === "acei" || aLower === "arb" || aLower === "arbs" || aLower === "lisinopril") {
+          if (ACEI_DRUGS.includes(dLower)) {
+            currentConflicts++;
+          }
+        }
+        if (aLower === "sulfa" || aLower === "sulfa drugs" || aLower === "sulfonamides") {
+          if (dLower.includes("sulfa") || dLower === "furosemide" || dLower === "hydrochlorothiazide") {
+            currentConflicts++;
+          }
+        }
+        if (aLower === "anticoagulants" || aLower === "anticoagulant" || aLower === "warfarin") {
+          if (ANTICOAGULANTS.includes(dLower)) {
+            currentConflicts++;
+          }
+        }
+      });
+    });
+
+    // Check if it is initial mount
+    if (prevConflictsCount.current === -1 || prevRegimenLength.current === -1) {
+      prevConflictsCount.current = currentConflicts;
+      prevRegimenLength.current = polypharmacyRegimen.length;
+      return;
+    }
+
+    // 1. If conflicts count changes, trigger color-pulse animation
+    if (currentConflicts !== prevConflictsCount.current) {
+      setPulseTrigger(prev => prev + 1);
+    }
+
+    // 2. If a new drug is added AND triggers a conflict, trigger a shake
+    if (polypharmacyRegimen.length > prevRegimenLength.current && currentConflicts > prevConflictsCount.current) {
+      setShakeTrigger(prev => prev + 1);
+    } else if (currentConflicts > prevConflictsCount.current) {
+      // Also shake if a new allergy is added that conflicts with an existing drug
+      setShakeTrigger(prev => prev + 1);
+    }
+
+    prevConflictsCount.current = currentConflicts;
+    prevRegimenLength.current = polypharmacyRegimen.length;
+  }, [polypharmacyRegimen, allergies]);
+
+  const handleAllergyAdd = (allergyName: string) => {
+    const clean = allergyName.trim();
+    if (!clean) return;
+    if (allergies.some(a => a.toLowerCase() === clean.toLowerCase())) {
+      showToast(`${clean} is already logged as an allergy`, "⚠️", "warning");
+      return;
+    }
+    setAllergies([...allergies, clean]);
+    setNewAllergy("");
+    showToast(`Added "${clean}" to patient allergies`, "🚨", "success");
+  };
+
+  const handleAllergyRemove = (allergyToRemove: string) => {
+    setAllergies(allergies.filter(a => a.toLowerCase() !== allergyToRemove.toLowerCase()));
+    showToast(`Removed "${allergyToRemove}" allergy`, "🗑️", "info");
+  };
 
   useEffect(() => {
     try {
@@ -444,6 +559,72 @@ export default function App() {
     return filteredDiseases[0] || diseases[0];
   }, [selectedEntity, filteredDiseases, diseases]);
 
+  // Memoized Patient Allergy Conflicts Engine with Cross-Sensitivity logic
+  const allergyConflicts = useMemo(() => {
+    const list: { drug: string; allergy: string; reason: string }[] = [];
+    
+    const NSAID_DRUGS = ["ibuprofen", "aspirin", "naproxen", "meloxicam", "diclofenac", "acetaminophen"];
+    const ACEI_DRUGS = ["lisinopril", "losartan", "valsartan", "enalapril", "captopril", "spironolactone"];
+    const ANTICOAGULANTS = ["warfarin", "heparin", "apixaban", "rivaroxaban", "dabigatran"];
+    
+    polypharmacyRegimen.forEach(drug => {
+      const dLower = drug.toLowerCase().trim();
+      allergies.forEach(allergy => {
+        const aLower = allergy.toLowerCase().trim();
+        
+        // Direct matches or substrings
+        if (dLower === aLower || dLower.includes(aLower) || aLower.includes(dLower)) {
+          list.push({
+            drug,
+            allergy,
+            reason: `Direct contradiction: "${drug}" conflicts with patient's allergy to "${allergy}"`
+          });
+          return;
+        }
+        
+        // Group & Class matching
+        if (aLower === "nsaid" || aLower === "nsaids") {
+          if (NSAID_DRUGS.includes(dLower)) {
+            list.push({
+              drug,
+              allergy,
+              reason: `Cross-sensitivity: "${drug}" is a class-conflicting NSAID`
+            });
+          }
+        }
+        if (aLower === "ace inhibitor" || aLower === "ace inhibitors" || aLower === "acei" || aLower === "arb" || aLower === "arbs" || aLower === "lisinopril") {
+          if (ACEI_DRUGS.includes(dLower)) {
+            list.push({
+              drug,
+              allergy,
+              reason: `Cross-sensitivity: "${drug}" is a class-conflicting ACE Inhibitor / ARB`
+            });
+          }
+        }
+        if (aLower === "sulfa" || aLower === "sulfa drugs" || aLower === "sulfonamides") {
+          if (dLower.includes("sulfa") || dLower === "furosemide" || dLower === "hydrochlorothiazide") {
+            list.push({
+              drug,
+              allergy,
+              reason: `Cross-sensitivity: "${drug}" contains a cross-reactive sulfonamide chemical structure`
+            });
+          }
+        }
+        if (aLower === "anticoagulants" || aLower === "anticoagulant" || aLower === "warfarin") {
+          if (ANTICOAGULANTS.includes(dLower)) {
+            list.push({
+              drug,
+              allergy,
+              reason: `Cross-sensitivity: "${drug}" is a class-conflicting anticoagulant`
+            });
+          }
+        }
+      });
+    });
+    
+    return list;
+  }, [polypharmacyRegimen, allergies]);
+
   const handlePrintSummary = useCallback(() => {
     showToast("Preparing clinical summary for export...", "🖨️", "info");
     window.print();
@@ -458,8 +639,7 @@ export default function App() {
             initial={{ opacity: 1 }}
             exit={{ opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0F172A] text-white p-6 cursor-pointer select-none"
-            onClick={() => setShowSplash(false)}
+            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0F172A] text-white p-6 select-none"
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
@@ -569,6 +749,193 @@ export default function App() {
         className="flex-1 overflow-y-auto relative z-10 p-3 md:p-5 pb-28"
       >
         <div className="max-w-7xl mx-auto space-y-4">
+          
+          {/* PERSISTENT PATIENT ALLERGY & CROSS-SENSITIVITY BANNER */}
+          <motion.div 
+            id="patient-allergy-banner"
+            layout="position"
+            key={`allergy-banner-${pulseTrigger}-${shakeTrigger}`}
+            initial={false}
+            animate={{
+              x: shakeTrigger > 0 ? [0, -10, 10, -10, 10, -5, 5, 0] : 0,
+            }}
+            transition={{
+              x: { duration: 0.45, ease: "easeInOut" }
+            }}
+            className={`w-full backdrop-blur-xl border rounded-xl p-4 transition-all duration-300 ${
+              allergyConflicts.length > 0 
+                ? 'border-rose-500/60 dark:border-rose-800/80 shadow-lg shadow-rose-500/5 animate-allergy-pulse-danger' 
+                : 'border-slate-200/80 dark:border-slate-800/80 shadow-xs animate-allergy-pulse-safe'
+            }`}
+          >
+            {/* Upper Info Row */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-200/60 dark:border-slate-800/80">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center border border-slate-200/50 dark:border-slate-700/50 shrink-0">
+                  <span className="font-mono text-xs font-bold text-slate-600 dark:text-slate-300">Pt</span>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-slate-800 dark:text-white uppercase tracking-wider">Active Patient Chart: #PM-88126</span>
+                    <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-500 dark:text-slate-400 font-mono">EMR Synced</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                    Male, {patientAge} Years | {patientWeight} kg | ClCr (eGFR): <span className="font-bold text-amber-600 dark:text-amber-400">45 mL/min</span> (Stage 3 CKD)
+                  </p>
+                </div>
+              </div>
+
+              {/* Conflict Status Tag */}
+              <div className="flex items-center gap-2">
+                {allergyConflicts.length > 0 ? (
+                  <div className="px-2.5 py-1 bg-rose-500/10 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-500/30 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                    <span>{allergyConflicts.length} Allergy Conflict{allergyConflicts.length > 1 ? 's' : ''} Detected</span>
+                  </div>
+                ) : (
+                  <div className="px-2.5 py-1 bg-emerald-500/10 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>No Allergy Conflicts</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Middle Row: Documented Allergies & Input */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-3">
+              {/* Left & Middle: Allergies Badges List */}
+              <div className="lg:col-span-2 space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 dark:text-slate-400">Documented Drug Allergies / Cross-Sensitivities:</span>
+                </div>
+                
+                {allergies.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {allergies.map(allergy => {
+                      // Check if this specific allergy has any active conflict
+                      const hasConflict = allergyConflicts.some(c => c.allergy.toLowerCase() === allergy.toLowerCase());
+                      return (
+                        <span 
+                          key={allergy}
+                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-semibold transition-all ${
+                            hasConflict 
+                              ? 'bg-rose-100 text-rose-900 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-900/60 ring-2 ring-rose-500 animate-pulse'
+                              : 'bg-slate-100 text-slate-800 border border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700'
+                          }`}
+                        >
+                          {hasConflict && <ShieldAlert className="w-3 h-3 text-rose-600 dark:text-rose-400 shrink-0" />}
+                          <span>{allergy}</span>
+                          <button 
+                            onClick={() => handleAllergyRemove(allergy)}
+                            className="p-0.5 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white rounded transition-colors ml-1"
+                            title={`Remove ${allergy}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400 italic">No documented drug allergies. Add allergies to evaluate safety.</p>
+                )}
+
+                {/* Quick Presets for Allergies */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Quick Add:</span>
+                  {["Penicillin", "Sulfa drugs", "NSAIDs", "Aspirin", "Lisinopril"].map(preset => {
+                    const exists = allergies.some(a => a.toLowerCase() === preset.toLowerCase());
+                    return (
+                      <button
+                        key={preset}
+                        onClick={() => handleAllergyAdd(preset)}
+                        disabled={exists}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-all ${
+                          exists 
+                            ? 'bg-slate-50 dark:bg-slate-850 text-slate-300 dark:text-slate-600 border-slate-100 dark:border-slate-800 cursor-not-allowed'
+                            : 'bg-white hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/30 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-rose-300'
+                        }`}
+                      >
+                        + {preset}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Right: Input To Add Custom Allergy */}
+              <div className="space-y-2">
+                <label htmlFor="custom-allergy-input" className="text-[10px] uppercase font-bold tracking-wider text-slate-500 dark:text-slate-400 block">
+                  Add Custom Allergen:
+                </label>
+                <div className="flex gap-1.5">
+                  <input 
+                    id="custom-allergy-input"
+                    type="text"
+                    value={newAllergy}
+                    onChange={e => setNewAllergy(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleAllergyAdd(newAllergy)}
+                    placeholder="e.g. Warfarin, Sulfa, Statin"
+                    className="w-full px-2.5 py-1 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1.5 focus:ring-rose-400 shadow-2xs"
+                  />
+                  <button 
+                    onClick={() => handleAllergyAdd(newAllergy)}
+                    className="px-3 py-1 bg-slate-800 hover:bg-slate-750 dark:bg-slate-700 dark:hover:bg-slate-600 border border-slate-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Active Conflicts Alerts Drawer */}
+            <AnimatePresence initial={false}>
+              {allergyConflicts.length > 0 && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.35, ease: "easeInOut" }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-3.5 pt-3 border-t border-rose-200/50 dark:border-rose-900/40 space-y-2">
+                    <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1 shrink-0">
+                      ⚠️ Critical Safety Warnings:
+                    </span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {allergyConflicts.map((conflict, index) => (
+                        <motion.div 
+                          key={`${index}-${shakeTrigger}`}
+                          initial={{ scale: 0.95, opacity: 0 }}
+                          animate={{ 
+                            scale: 1, 
+                            opacity: 1,
+                            x: shakeTrigger > 0 ? [0, -8, 8, -8, 8, -4, 4, 0] : 0
+                          }}
+                          transition={{ 
+                            x: { duration: 0.45, ease: "easeInOut" },
+                            default: { duration: 0.25 }
+                          }}
+                          className="p-2.5 bg-rose-50 dark:bg-rose-950/40 rounded-lg border border-rose-100 dark:border-rose-900/50 text-[11px] text-rose-900 dark:text-rose-200 flex items-start gap-2 shadow-2xs"
+                        >
+                          <ShieldAlert className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                          <div className="space-y-0.5">
+                            <span className="font-bold text-rose-950 dark:text-rose-200">
+                              {conflict.drug} vs Allergy to {conflict.allergy}
+                            </span>
+                            <p className="text-rose-800/90 dark:text-rose-300/90 leading-relaxed text-[10px]">
+                              {conflict.reason}
+                            </p>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
           
           {/* TAB 1: MEDICAL DICTIONARY & INDEX */}
           {activeNavTab === "dictionary" && (
@@ -1062,168 +1429,172 @@ export default function App() {
               </div>
 
               {/* Full-Width Scrollable Active Disease Profile View */}
-              <div className="w-full bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl border border-white/60 dark:border-slate-800/80 rounded-xl p-5 shadow-sm max-h-[700px] overflow-y-auto space-y-5 pr-2 text-slate-900 dark:text-slate-100">
-                {activeDisease ? (
-                  <>
-                    {/* Header / Meta Card */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-[10px] font-bold rounded-md uppercase tracking-wider">
-                            Pathology Profile
-                          </span>
-                          {activeDisease.icdCode && (
-                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-mono font-bold rounded-md">
-                              ICD-11: {activeDisease.icdCode}
+              {isPathologyLoading ? (
+                <PathologyProfileSkeletonLoader />
+              ) : (
+                <div className="w-full bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl border border-white/60 dark:border-slate-800/80 rounded-xl p-5 shadow-sm max-h-[700px] overflow-y-auto space-y-5 pr-2 text-slate-900 dark:text-slate-100">
+                  {activeDisease ? (
+                    <>
+                      {/* Header / Meta Card */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 dark:border-slate-800 pb-4">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-200 text-[10px] font-bold rounded-md uppercase tracking-wider">
+                              Pathology Profile
                             </span>
-                          )}
+                            {activeDisease.icdCode && (
+                              <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-mono font-bold rounded-md">
+                                ICD-11: {activeDisease.icdCode}
+                              </span>
+                            )}
+                          </div>
+                          <h2 className="text-xl font-bold text-slate-900 dark:text-white">{activeDisease.title}</h2>
+                          <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">{activeDisease.summary}</p>
                         </div>
-                        <h2 className="text-xl font-bold text-slate-900">{activeDisease.title}</h2>
-                        <p className="text-xs text-slate-600 mt-1">{activeDisease.summary}</p>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={e => toggleBookmark(activeDisease.id, e)}
+                            className={`p-2 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                              bookmarks.includes(activeDisease.id)
+                                ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            <Bookmark className={`w-4 h-4 ${bookmarks.includes(activeDisease.id) ? 'fill-amber-500 text-amber-500' : ''}`} />
+                            <span>{bookmarks.includes(activeDisease.id) ? 'Saved' : 'Save'}</span>
+                          </button>
+
+                          <button
+                            onClick={handlePrintSummary}
+                            className="p-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors"
+                          >
+                            <Printer className="w-4 h-4" />
+                            <span className="hidden sm:inline">Print</span>
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={e => toggleBookmark(activeDisease.id, e)}
-                          className={`p-2 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-colors ${
-                            bookmarks.includes(activeDisease.id)
-                              ? 'bg-amber-50 text-amber-700 border-amber-200'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                          }`}
-                        >
-                          <Bookmark className={`w-4 h-4 ${bookmarks.includes(activeDisease.id) ? 'fill-amber-500 text-amber-500' : ''}`} />
-                          <span>{bookmarks.includes(activeDisease.id) ? 'Saved' : 'Save'}</span>
-                        </button>
+                      {/* Prognosis & Classification Metadata */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
+                          <div className="text-[9px] text-slate-500 dark:text-slate-400 font-bold uppercase mb-0.5">ICD-11 Code</div>
+                          <div className="text-sm font-mono font-bold text-blue-600 dark:text-blue-400">{activeDisease.icdCode || 'N/A'}</div>
+                        </div>
+                        <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
+                          <div className="text-[9px] text-slate-500 dark:text-slate-400 font-bold uppercase mb-0.5">Clinical Classification</div>
+                          <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 capitalize">{activeDisease.category}</div>
+                        </div>
+                        <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
+                          <div className="text-[9px] text-slate-500 dark:text-slate-400 font-bold uppercase mb-0.5">Prognosis</div>
+                          <div className="text-[11px] font-medium text-slate-800 dark:text-slate-200">{activeDisease.details.prognosis || 'Favorable with timely clinical intervention'}</div>
+                        </div>
+                      </div>
 
-                        <button
-                          onClick={handlePrintSummary}
-                          className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors"
-                        >
-                          <Printer className="w-4 h-4" />
-                          <span className="hidden sm:inline">Print</span>
-                        </button>
+                      {/* Pathophysiology & Etiology */}
+                      <div className="p-4 bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3 shadow-2xs">
+                        <h3 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <Stethoscope className="text-blue-600 dark:text-blue-400 w-4 h-4" /> Pathophysiology & Etiology Overview
+                        </h3>
+                        {activeDisease.details.overview && (
+                          <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">{activeDisease.details.overview}</p>
+                        )}
+                        {activeDisease.details.etiology && (
+                          <div className="p-3 bg-blue-50/70 dark:bg-blue-950/40 rounded-lg border border-blue-100 dark:border-blue-900/50 text-[11px] text-blue-900 dark:text-blue-200 space-y-1">
+                            <span className="font-bold uppercase tracking-wider block text-[10px] text-blue-800 dark:text-blue-300">Cellular Mechanism & Etiology:</span>
+                            <p className="leading-relaxed">{activeDisease.details.etiology}</p>
+                          </div>
+                        )}
                       </div>
-                    </div>
 
-                    {/* Prognosis & Classification Metadata */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
-                        <div className="text-[9px] text-slate-500 font-bold uppercase mb-0.5">ICD-11 Code</div>
-                        <div className="text-sm font-mono font-bold text-blue-600">{activeDisease.icdCode || 'N/A'}</div>
-                      </div>
-                      <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
-                        <div className="text-[9px] text-slate-500 font-bold uppercase mb-0.5">Clinical Classification</div>
-                        <div className="text-xs font-semibold text-slate-800 capitalize">{activeDisease.category}</div>
-                      </div>
-                      <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
-                        <div className="text-[9px] text-slate-500 font-bold uppercase mb-0.5">Prognosis</div>
-                        <div className="text-[11px] font-medium text-slate-800">{activeDisease.details.prognosis || 'Favorable with timely clinical intervention'}</div>
-                      </div>
-                    </div>
-
-                    {/* Pathophysiology & Etiology */}
-                    <div className="p-4 bg-white border border-slate-200/80 rounded-xl space-y-3 shadow-2xs">
-                      <h3 className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                        <Stethoscope className="text-blue-600 w-4 h-4" /> Pathophysiology & Etiology Overview
-                      </h3>
-                      {activeDisease.details.overview && (
-                        <p className="text-xs text-slate-700 leading-relaxed">{activeDisease.details.overview}</p>
+                      {/* Symptoms & Clinical Presentation */}
+                      {activeDisease.details.symptoms && activeDisease.details.symptoms.length > 0 && (
+                        <div className="p-4 bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3 shadow-2xs">
+                          <h3 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <Activity className="text-rose-500 dark:text-rose-400 w-4 h-4" /> Key Clinical Symptoms & Presentation
+                          </h3>
+                          <div className="flex flex-wrap gap-1.5">
+                            {activeDisease.details.symptoms.map((symptom, idx) => (
+                              <span key={idx} className="px-2.5 py-1 bg-rose-50 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900/50 text-rose-800 dark:text-rose-200 text-xs font-medium rounded-lg">
+                                • {symptom}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                       )}
-                      {activeDisease.details.etiology && (
-                        <div className="p-3 bg-blue-50/70 rounded-lg border border-blue-100 text-[11px] text-blue-900 space-y-1">
-                          <span className="font-bold uppercase tracking-wider block text-[10px] text-blue-800">Cellular Mechanism & Etiology:</span>
-                          <p className="leading-relaxed">{activeDisease.details.etiology}</p>
+
+                      {/* Etiology & Causes */}
+                      {activeDisease.details.causes && activeDisease.details.causes.length > 0 && (
+                        <div className="p-4 bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3 shadow-2xs">
+                          <h3 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <AlertTriangle className="text-amber-500 dark:text-amber-400 w-4 h-4" /> Etiology & Predisposing Causes
+                          </h3>
+                          <ul className="space-y-1 text-xs text-slate-700 dark:text-slate-300">
+                            {activeDisease.details.causes.map((cause, idx) => (
+                              <li key={idx} className="flex items-start gap-2">
+                                <span className="text-amber-500 dark:text-amber-400 font-bold">•</span>
+                                <span>{cause}</span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       )}
-                    </div>
 
-                    {/* Symptoms & Clinical Presentation */}
-                    {activeDisease.details.symptoms && activeDisease.details.symptoms.length > 0 && (
-                      <div className="p-4 bg-white border border-slate-200/80 rounded-xl space-y-3 shadow-2xs">
-                        <h3 className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                          <Activity className="text-rose-500 w-4 h-4" /> Key Clinical Symptoms & Presentation
-                        </h3>
-                        <div className="flex flex-wrap gap-1.5">
-                          {activeDisease.details.symptoms.map((symptom, idx) => (
-                            <span key={idx} className="px-2.5 py-1 bg-rose-50 border border-rose-100 text-rose-800 text-xs font-medium rounded-lg">
-                              • {symptom}
-                            </span>
-                          ))}
+                      {/* Diagnostic Criteria */}
+                      {activeDisease.details.diagnostics && activeDisease.details.diagnostics.length > 0 && (
+                        <div className="p-4 bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3 shadow-2xs">
+                          <h3 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <FileText className="text-teal-600 dark:text-teal-400 w-4 h-4" /> Diagnostic Criteria & Imaging / Labs
+                          </h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {activeDisease.details.diagnostics.map((diag, idx) => (
+                              <div key={idx} className="p-2.5 bg-teal-50/50 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/40 rounded-lg text-xs text-teal-900 dark:text-teal-200 flex items-center gap-2">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+                                <span>{diag}</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Etiology & Causes */}
-                    {activeDisease.details.causes && activeDisease.details.causes.length > 0 && (
-                      <div className="p-4 bg-white border border-slate-200/80 rounded-xl space-y-3 shadow-2xs">
-                        <h3 className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                          <AlertTriangle className="text-amber-500 w-4 h-4" /> Etiology & Predisposing Causes
-                        </h3>
-                        <ul className="space-y-1 text-xs text-slate-700">
-                          {activeDisease.details.causes.map((cause, idx) => (
-                            <li key={idx} className="flex items-start gap-2">
-                              <span className="text-amber-500 font-bold">•</span>
-                              <span>{cause}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Diagnostic Criteria */}
-                    {activeDisease.details.diagnostics && activeDisease.details.diagnostics.length > 0 && (
-                      <div className="p-4 bg-white border border-slate-200/80 rounded-xl space-y-3 shadow-2xs">
-                        <h3 className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                          <FileText className="text-teal-600 w-4 h-4" /> Diagnostic Criteria & Imaging / Labs
-                        </h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {activeDisease.details.diagnostics.map((diag, idx) => (
-                            <div key={idx} className="p-2.5 bg-teal-50/50 border border-teal-100 rounded-lg text-xs text-teal-900 flex items-center gap-2">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                              <span>{diag}</span>
-                            </div>
-                          ))}
+                      {/* Treatment Protocols */}
+                      {activeDisease.details.treatment && activeDisease.details.treatment.length > 0 && (
+                        <div className="p-4 bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3 shadow-2xs">
+                          <h3 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <Pill className="text-emerald-600 dark:text-emerald-400 w-4 h-4" /> Standard Management & Clinical Protocols
+                          </h3>
+                          <ul className="space-y-1.5 text-xs text-slate-700 dark:text-slate-300">
+                            {activeDisease.details.treatment.map((rx, idx) => (
+                              <li key={idx} className="flex items-start gap-2 p-2 bg-emerald-50/40 dark:bg-emerald-950/30 border border-emerald-100/80 dark:border-emerald-900/40 rounded-lg">
+                                <span className="text-emerald-600 dark:text-emerald-400 font-bold">•</span>
+                                <span>{rx}</span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Treatment Protocols */}
-                    {activeDisease.details.treatment && activeDisease.details.treatment.length > 0 && (
-                      <div className="p-4 bg-white border border-slate-200/80 rounded-xl space-y-3 shadow-2xs">
-                        <h3 className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                          <Pill className="text-emerald-600 w-4 h-4" /> Standard Management & Clinical Protocols
-                        </h3>
-                        <ul className="space-y-1.5 text-xs text-slate-700">
-                          {activeDisease.details.treatment.map((rx, idx) => (
-                            <li key={idx} className="flex items-start gap-2 p-2 bg-emerald-50/40 border border-emerald-100/80 rounded-lg">
-                              <span className="text-emerald-600 font-bold">•</span>
-                              <span>{rx}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Potential Complications */}
-                    {activeDisease.details.complications && activeDisease.details.complications.length > 0 && (
-                      <div className="p-4 bg-white border border-slate-200/80 rounded-xl space-y-3 shadow-2xs">
-                        <h3 className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                          <ShieldAlert className="text-rose-600 w-4 h-4" /> Potential Complications
-                        </h3>
-                        <div className="flex flex-wrap gap-1.5">
-                          {activeDisease.details.complications.map((comp, idx) => (
-                            <span key={idx} className="px-2.5 py-1 bg-slate-100 border border-slate-200 text-slate-800 text-xs rounded-lg">
-                              ⚠️ {comp}
-                            </span>
-                          ))}
+                      {/* Potential Complications */}
+                      {activeDisease.details.complications && activeDisease.details.complications.length > 0 && (
+                        <div className="p-4 bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 rounded-xl space-y-3 shadow-2xs">
+                          <h3 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <ShieldAlert className="text-rose-600 dark:text-rose-400 w-4 h-4" /> Potential Complications
+                          </h3>
+                          <div className="flex flex-wrap gap-1.5">
+                            {activeDisease.details.complications.map((comp, idx) => (
+                              <span key={idx} className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs rounded-lg">
+                                ⚠️ {comp}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="p-8 text-center text-slate-500 text-xs">Select a pathology condition to view its complete disease profile.</div>
-                )}
-              </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-xs">Select a pathology condition to view its complete disease profile.</div>
+                  )}
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -1484,6 +1855,7 @@ export default function App() {
                         setPatientAge(age);
                         setPatientWeight(weight);
                       }}
+                      allergies={allergies}
                     />
 
                     {/* Clinical Records Section */}
