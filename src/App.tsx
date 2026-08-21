@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { jsPDF } from "jspdf";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -25,6 +26,7 @@ import {
   Heart,
   UserCheck,
   CheckCircle2,
+  Check,
   X,
   Share2,
   ChevronLeft,
@@ -34,7 +36,8 @@ import {
   Moon,
   ChevronDown,
   Filter,
-  History
+  History,
+  Trash2
 } from "lucide-react";
 import { UnifiedMedicalData, MedicalEntity } from "./types";
 import { MEDICAL_DATABASE } from "./data/medicalDatabase";
@@ -281,6 +284,83 @@ export default function App() {
 
   const [newAllergy, setNewAllergy] = useState("");
 
+  const [acknowledgedConflicts, setAcknowledgedConflicts] = useState<{ drug: string; allergy: string; timestamp: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('splendid_acknowledged_conflicts');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      // ignore
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('splendid_acknowledged_conflicts', JSON.stringify(acknowledgedConflicts));
+    } catch (e) {
+      // ignore
+    }
+  }, [acknowledgedConflicts]);
+
+  const handleAcknowledgeConflict = (drug: string, allergy: string) => {
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ', ' + new Date().toLocaleDateString([], { month: 'short', day: 'numeric' });
+    setAcknowledgedConflicts(prev => {
+      const exists = prev.some(c => c.drug.toLowerCase() === drug.toLowerCase() && c.allergy.toLowerCase() === allergy.toLowerCase());
+      if (exists) return prev;
+      return [...prev, { drug, allergy, timestamp }];
+    });
+    showToast(`Reviewed & Acknowledged conflict for ${drug}`, "✔️", "success");
+  };
+
+  const handleReinstateConflict = (drug: string, allergy: string) => {
+    setAcknowledgedConflicts(prev => prev.filter(c => !(c.drug.toLowerCase() === drug.toLowerCase() && c.allergy.toLowerCase() === allergy.toLowerCase())));
+    showToast(`Conflict warning for ${drug} reinstated`, "🔄", "info");
+  };
+
+  const [clinicalNotes, setClinicalNotes] = useState<{ id: string; content: string; timestamp: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('splendid_clinical_notes');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      // ignore
+    }
+    return [
+      {
+        id: "1",
+        content: "Proceeding with cautious polypharmacy. Renal parameters (Serum Creatinine/eGFR) are monitored bi-weekly.",
+        timestamp: "09:12 AM, Aug 21"
+      }
+    ];
+  });
+
+  const [newClinicalNote, setNewClinicalNote] = useState("");
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('splendid_clinical_notes', JSON.stringify(clinicalNotes));
+    } catch (e) {
+      // ignore
+    }
+  }, [clinicalNotes]);
+
+  const handleAddClinicalNote = () => {
+    if (!newClinicalNote.trim()) return;
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + new Date().toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const note = {
+      id: Date.now().toString(),
+      content: newClinicalNote.trim(),
+      timestamp
+    };
+    setClinicalNotes(prev => [note, ...prev]);
+    setNewClinicalNote("");
+    showToast("New clinical note appended to chart.", "📝", "success");
+  };
+
+  const handleDeleteClinicalNote = (id: string) => {
+    setClinicalNotes(prev => prev.filter(note => note.id !== id));
+    showToast("Clinical note removed.", "🗑️", "info");
+  };
+
   const [shakeTrigger, setShakeTrigger] = useState(0);
   const [pulseTrigger, setPulseTrigger] = useState(0);
   const prevConflictsCount = useRef(-1);
@@ -307,27 +387,33 @@ export default function App() {
       const dLower = drug.toLowerCase().trim();
       allergies.forEach(allergy => {
         const aLower = allergy.toLowerCase().trim();
+        let isConflicting = false;
+        
         if (dLower === aLower || dLower.includes(aLower) || aLower.includes(dLower)) {
-          currentConflicts++;
-          return;
-        }
-        if (aLower === "nsaid" || aLower === "nsaids") {
+          isConflicting = true;
+        } else if (aLower === "nsaid" || aLower === "nsaids") {
           if (NSAID_DRUGS.includes(dLower)) {
-            currentConflicts++;
+            isConflicting = true;
           }
-        }
-        if (aLower === "ace inhibitor" || aLower === "ace inhibitors" || aLower === "acei" || aLower === "arb" || aLower === "arbs" || aLower === "lisinopril") {
+        } else if (aLower === "ace inhibitor" || aLower === "ace inhibitors" || aLower === "acei" || aLower === "arb" || aLower === "arbs" || aLower === "lisinopril") {
           if (ACEI_DRUGS.includes(dLower)) {
-            currentConflicts++;
+            isConflicting = true;
           }
-        }
-        if (aLower === "sulfa" || aLower === "sulfa drugs" || aLower === "sulfonamides") {
+        } else if (aLower === "sulfa" || aLower === "sulfa drugs" || aLower === "sulfonamides") {
           if (dLower.includes("sulfa") || dLower === "furosemide" || dLower === "hydrochlorothiazide") {
-            currentConflicts++;
+            isConflicting = true;
+          }
+        } else if (aLower === "anticoagulants" || aLower === "anticoagulant" || aLower === "warfarin") {
+          if (ANTICOAGULANTS.includes(dLower)) {
+            isConflicting = true;
           }
         }
-        if (aLower === "anticoagulants" || aLower === "anticoagulant" || aLower === "warfarin") {
-          if (ANTICOAGULANTS.includes(dLower)) {
+
+        if (isConflicting) {
+          const isAcked = acknowledgedConflicts.some(
+            c => c.drug.toLowerCase() === drug.toLowerCase() && c.allergy.toLowerCase() === allergy.toLowerCase()
+          );
+          if (!isAcked) {
             currentConflicts++;
           }
         }
@@ -346,7 +432,7 @@ export default function App() {
       setPulseTrigger(prev => prev + 1);
     }
 
-    // 2. If a new drug is added AND triggers a conflict, trigger a shake
+    // 2. If a new drug is added AND triggers an active conflict, trigger a shake
     if (polypharmacyRegimen.length > prevRegimenLength.current && currentConflicts > prevConflictsCount.current) {
       setShakeTrigger(prev => prev + 1);
     } else if (currentConflicts > prevConflictsCount.current) {
@@ -356,7 +442,7 @@ export default function App() {
 
     prevConflictsCount.current = currentConflicts;
     prevRegimenLength.current = polypharmacyRegimen.length;
-  }, [polypharmacyRegimen, allergies]);
+  }, [polypharmacyRegimen, allergies, acknowledgedConflicts]);
 
   const handleAllergyAdd = (allergyName: string) => {
     const clean = allergyName.trim();
@@ -625,10 +711,322 @@ export default function App() {
     return list;
   }, [polypharmacyRegimen, allergies]);
 
+  const activeAllergyConflicts = useMemo(() => {
+    return allergyConflicts.filter(conflict => {
+      return !acknowledgedConflicts.some(
+        ack => ack.drug.toLowerCase() === conflict.drug.toLowerCase() && ack.allergy.toLowerCase() === conflict.allergy.toLowerCase()
+      );
+    });
+  }, [allergyConflicts, acknowledgedConflicts]);
+
   const handlePrintSummary = useCallback(() => {
     showToast("Preparing clinical summary for export...", "🖨️", "info");
     window.print();
   }, []);
+
+  const handleDownloadClinicalPDF = useCallback(() => {
+    try {
+      showToast("Compiling clinical data into PDF report...", "📄", "info");
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4"
+      });
+
+      // Color palette definitions
+      const primaryColor = [15, 23, 42]; // Slate 900
+      const secondaryColor = [71, 85, 105]; // Slate 600
+      const dangerColor = [225, 29, 72]; // Rose 600
+      const successColor = [5, 150, 105]; // Emerald 600
+      const dividerColor = [226, 232, 240]; // Slate 200
+
+      // Title & Header Banner
+      doc.setFillColor(15, 23, 42); // slate 900
+      doc.rect(0, 0, 210, 32, "F");
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.text("SPLENDID MED-REF CLINICAL REPORT", 14, 15);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(148, 163, 184); // slate 400
+      doc.text("Clinical Decision Support & Polypharmacy EMR Synced Summary", 14, 22);
+      
+      // Timestamp
+      const currentDateStr = new Date().toLocaleString("en-US", {
+        dateStyle: "medium",
+        timeStyle: "short"
+      });
+      doc.text(`Generated: ${currentDateStr}`, 196, 22, { align: "right" });
+
+      // Patient Health Chart Card
+      let y = 42;
+      doc.setFillColor(248, 250, 252); // slate 50
+      doc.rect(14, y, 182, 22, "F");
+      doc.setDrawColor(203, 213, 225); // slate 300
+      doc.rect(14, y, 182, 22, "D");
+
+      doc.setTextColor(15, 23, 42);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("PATIENT HEALTH CHART SUMMARY", 18, y + 6);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.text(`Chart ID: #PM-88126`, 18, y + 11);
+      doc.text(`Demographics: Male, ${patientAge} Years | ${patientWeight} kg`, 18, y + 16);
+      
+      doc.text(`Clinical Conditions: Stage 3 CKD`, 110, y + 11);
+      doc.text(`eGFR Clearance: 45 mL/min (Moderate Impairment)`, 110, y + 16);
+
+      // Documented Allergies Section
+      y += 30;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      doc.text("DOCUMENTED DRUG ALLERGIES / CROSS-SENSITIVITIES", 14, y);
+      
+      doc.setDrawColor(226, 232, 240); // slate 200
+      doc.line(14, y + 2, 196, y + 2);
+
+      y += 8;
+      if (allergies.length === 0) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.setTextColor(100, 116, 139);
+        doc.text("No drug allergies documented for this patient profile.", 14, y);
+        y += 6;
+      } else {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(190, 24, 74); // Rose danger text
+        
+        const chunkedAllergies = [];
+        const tempArray = [...allergies];
+        while (tempArray.length > 0) {
+          chunkedAllergies.push(tempArray.splice(0, 3));
+        }
+
+        chunkedAllergies.forEach((row) => {
+          let xOffset = 14;
+          row.forEach((allergy) => {
+            doc.setFillColor(254, 242, 242);
+            doc.rect(xOffset, y - 4, 54, 6, "F");
+            doc.setDrawColor(254, 205, 211);
+            doc.rect(xOffset, y - 4, 54, 6, "D");
+            doc.text(`* Allergy to: ${allergy}`, xOffset + 3, y);
+            xOffset += 61;
+          });
+          y += 8;
+        });
+      }
+
+      // Polypharmacy Medication Regimen Section
+      y += 4;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      doc.text("CURRENT ACTIVE POLYPHARMACY REGIMEN", 14, y);
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, y + 2, 196, y + 2);
+
+      y += 8;
+      if (polypharmacyRegimen.length === 0) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.setTextColor(100, 116, 139);
+        doc.text("No active medications in current regimen.", 14, y);
+        y += 6;
+      } else {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(51, 65, 85);
+        
+        const chunkedRegimen = [];
+        const tempRegArray = [...polypharmacyRegimen];
+        while (tempRegArray.length > 0) {
+          chunkedRegimen.push(tempRegArray.splice(0, 3));
+        }
+
+        chunkedRegimen.forEach((row) => {
+          let xOffset = 14;
+          row.forEach((drug) => {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(xOffset, y - 4, 54, 6, "F");
+            doc.setDrawColor(226, 232, 240);
+            doc.rect(xOffset, y - 4, 54, 6, "D");
+            doc.setFont("helvetica", "bold");
+            doc.text(drug, xOffset + 3, y);
+            xOffset += 61;
+          });
+          y += 8;
+        });
+      }
+
+      // Active Allergy Conflicts Section
+      y += 4;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      doc.text("CRITICAL ACTIVE ALLERGY CONFLICT WARNINGS", 14, y);
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, y + 2, 196, y + 2);
+
+      y += 8;
+      if (activeAllergyConflicts.length === 0) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(5, 150, 105); // emerald
+        doc.text("PASSED: No active or unacknowledged clinical allergy conflicts detected in this profile.", 14, y);
+        y += 8;
+      } else {
+        activeAllergyConflicts.forEach((conflict) => {
+          if (y > 270) {
+            doc.addPage();
+            y = 20;
+          }
+          doc.setFillColor(254, 242, 242);
+          doc.rect(14, y - 4, 182, 12, "F");
+          doc.setDrawColor(248, 113, 113);
+          doc.rect(14, y - 4, 182, 12, "D");
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(8.5);
+          doc.setTextColor(153, 27, 27); // dark red
+          doc.text(`[WARNING] Conflict: ${conflict.drug} vs Patient Allergy to ${conflict.allergy}`, 18, y + 1);
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(7.5);
+          doc.setTextColor(127, 29, 29);
+          doc.text(conflict.reason, 18, y + 5);
+          y += 15;
+        });
+      }
+
+      // Reviewed / Acknowledged Warnings Section
+      y += 2;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      doc.text("CLINICIAN-REVIEWED & ACKNOWLEDGED CONFLICTS", 14, y);
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, y + 2, 196, y + 2);
+
+      y += 8;
+      if (acknowledgedConflicts.length === 0) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.setTextColor(100, 116, 139);
+        doc.text("No conflicts have been marked as reviewed or acknowledged during this session.", 14, y);
+        y += 8;
+      } else {
+        acknowledgedConflicts.forEach((ack) => {
+          if (y > 270) {
+            doc.addPage();
+            y = 20;
+          }
+          doc.setFillColor(240, 253, 250); // green 50
+          doc.rect(14, y - 4, 182, 12, "F");
+          doc.setDrawColor(110, 231, 183); // emerald border
+          doc.rect(14, y - 4, 182, 12, "D");
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(8.5);
+          doc.setTextColor(6, 95, 70); // emerald 800
+          doc.text(`[ACKNOWLEDGED] Resolved: ${ack.drug} vs Allergy to ${ack.allergy}`, 18, y + 1);
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(7.5);
+          doc.setTextColor(71, 85, 105);
+          doc.text(`Status: Verified & Acknowledged by clinician on ${ack.timestamp}`, 18, y + 5);
+          y += 15;
+        });
+      }
+
+      // Clinical Notes / Justification Annotations
+      y += 2;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      doc.text("CLINICAL CHART NOTES & JUSTIFICATIONS", 14, y);
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, y + 2, 196, y + 2);
+
+      y += 8;
+      if (clinicalNotes.length === 0) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.setTextColor(100, 116, 139);
+        doc.text("No custom clinical chart notes or justifications appended.", 14, y);
+        y += 8;
+      } else {
+        clinicalNotes.forEach((note) => {
+          const lines = doc.splitTextToSize(note.content, 174);
+          const boxHeight = 8 + (lines.length * 4);
+          if (y + boxHeight > 275) {
+            doc.addPage();
+            y = 20;
+          }
+          doc.setFillColor(248, 250, 252); // slate 50
+          doc.rect(14, y - 4, 182, boxHeight, "F");
+          doc.setDrawColor(226, 232, 240); // slate 200
+          doc.rect(14, y - 4, 182, boxHeight, "D");
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          doc.setTextColor(51, 65, 85);
+          doc.text(lines, 18, y + 1);
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(7);
+          doc.setTextColor(100, 116, 139);
+          doc.text(`Recorded: ${note.timestamp}`, 18, y + (lines.length * 4) + 1);
+          y += boxHeight + 4;
+        });
+      }
+
+      // Disclaimer & Signature Block
+      if (y > 240) {
+        doc.addPage();
+        y = 20;
+      }
+      y += 10;
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, y, 196, y);
+      
+      y += 6;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      doc.text("CLINICAL REVIEWER SIGN-OFF", 14, y);
+      
+      doc.setFont("helvetica", "normal");
+      doc.text("Authorized Clinician Signature: ____________________________________", 14, y + 8);
+      doc.text("Review Date: ________________________", 124, y + 8);
+
+      // Disclaimer footer text
+      y += 18;
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(6.5);
+      doc.setTextColor(148, 163, 184);
+      const disclaimerLines = [
+        "Splendid Med-Ref Clinical Systems provides drug interaction and cross-sensitivity information for decision support purposes only.",
+        "The clinical supervisor retains full and final legal responsibility for patient therapeutics and dosage determinations."
+      ];
+      disclaimerLines.forEach((line, i) => {
+        doc.text(line, 14, y + (i * 3.5));
+      });
+
+      // Save the generated document
+      doc.save(`Clinical_Report_PM-88126_${new Date().toISOString().split('T')[0]}.pdf`);
+      showToast("PDF clinical report downloaded!", "📄", "success");
+    } catch (error) {
+      console.error("PDF generation failed:", error);
+      showToast("Failed to compile clinical PDF.", "❌", "error");
+    }
+  }, [patientAge, patientWeight, allergies, polypharmacyRegimen, activeAllergyConflicts, acknowledgedConflicts, clinicalNotes]);
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans select-none transition-colors duration-200">
@@ -763,7 +1161,7 @@ export default function App() {
               x: { duration: 0.45, ease: "easeInOut" }
             }}
             className={`w-full backdrop-blur-xl border rounded-xl p-4 transition-all duration-300 ${
-              allergyConflicts.length > 0 
+              activeAllergyConflicts.length > 0 
                 ? 'border-rose-500/60 dark:border-rose-800/80 shadow-lg shadow-rose-500/5 animate-allergy-pulse-danger' 
                 : 'border-slate-200/80 dark:border-slate-800/80 shadow-xs animate-allergy-pulse-safe'
             }`}
@@ -785,12 +1183,21 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Conflict Status Tag */}
+              {/* Conflict Status Tag & Download Action */}
               <div className="flex items-center gap-2">
-                {allergyConflicts.length > 0 ? (
+                <button
+                  onClick={handleDownloadClinicalPDF}
+                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white border border-blue-500 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                  title="Generate and download full clinical report PDF"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download PDF</span>
+                </button>
+
+                {activeAllergyConflicts.length > 0 ? (
                   <div className="px-2.5 py-1 bg-rose-500/10 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-500/30 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
                     <ShieldAlert className="w-3.5 h-3.5" />
-                    <span>{allergyConflicts.length} Allergy Conflict{allergyConflicts.length > 1 ? 's' : ''} Detected</span>
+                    <span>{activeAllergyConflicts.length} Allergy Conflict{activeAllergyConflicts.length > 1 ? 's' : ''} Detected</span>
                   </div>
                 ) : (
                   <div className="px-2.5 py-1 bg-emerald-500/10 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5">
@@ -814,7 +1221,7 @@ export default function App() {
                   <div className="flex flex-wrap gap-1.5">
                     {allergies.map(allergy => {
                       // Check if this specific allergy has any active conflict
-                      const hasConflict = allergyConflicts.some(c => c.allergy.toLowerCase() === allergy.toLowerCase());
+                      const hasConflict = activeAllergyConflicts.some(c => c.allergy.toLowerCase() === allergy.toLowerCase());
                       return (
                         <span 
                           key={allergy}
@@ -891,7 +1298,7 @@ export default function App() {
 
             {/* Active Conflicts Alerts Drawer */}
             <AnimatePresence initial={false}>
-              {allergyConflicts.length > 0 && (
+              {activeAllergyConflicts.length > 0 && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
@@ -904,9 +1311,9 @@ export default function App() {
                       ⚠️ Critical Safety Warnings:
                     </span>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {allergyConflicts.map((conflict, index) => (
+                      {activeAllergyConflicts.map((conflict, index) => (
                         <motion.div 
-                          key={`${index}-${shakeTrigger}`}
+                          key={`${conflict.drug}-${conflict.allergy}-${shakeTrigger}`}
                           initial={{ scale: 0.95, opacity: 0 }}
                           animate={{ 
                             scale: 1, 
@@ -917,17 +1324,28 @@ export default function App() {
                             x: { duration: 0.45, ease: "easeInOut" },
                             default: { duration: 0.25 }
                           }}
-                          className="p-2.5 bg-rose-50 dark:bg-rose-950/40 rounded-lg border border-rose-100 dark:border-rose-900/50 text-[11px] text-rose-900 dark:text-rose-200 flex items-start gap-2 shadow-2xs"
+                          className="p-2.5 bg-rose-50 dark:bg-rose-950/40 rounded-lg border border-rose-100 dark:border-rose-900/50 text-[11px] text-rose-900 dark:text-rose-200 flex items-start justify-between gap-2 shadow-2xs"
                         >
-                          <ShieldAlert className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
-                          <div className="space-y-0.5">
-                            <span className="font-bold text-rose-950 dark:text-rose-200">
-                              {conflict.drug} vs Allergy to {conflict.allergy}
-                            </span>
-                            <p className="text-rose-800/90 dark:text-rose-300/90 leading-relaxed text-[10px]">
-                              {conflict.reason}
-                            </p>
+                          <div className="flex items-start gap-2">
+                            <ShieldAlert className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <span className="font-bold text-rose-950 dark:text-rose-200">
+                                {conflict.drug} vs Allergy to {conflict.allergy}
+                              </span>
+                              <p className="text-rose-800/90 dark:text-rose-300/90 leading-relaxed text-[10px]">
+                                {conflict.reason}
+                              </p>
+                            </div>
                           </div>
+                          
+                          <button
+                            onClick={() => handleAcknowledgeConflict(conflict.drug, conflict.allergy)}
+                            className="shrink-0 flex items-center gap-1 px-2 py-1 rounded bg-rose-600/10 hover:bg-rose-600/20 dark:bg-rose-400/10 dark:hover:bg-rose-400/20 text-rose-800 dark:text-rose-300 border border-rose-500/20 text-[10px] font-bold transition-all cursor-pointer"
+                            title="Acknowledge conflict and mark as reviewed"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span className="hidden sm:inline">Review</span>
+                          </button>
                         </motion.div>
                       ))}
                     </div>
@@ -935,6 +1353,108 @@ export default function App() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Resolved / Acknowledged Conflicts History List */}
+            {acknowledgedConflicts.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-slate-200/40 dark:border-slate-800/60">
+                <details className="group">
+                  <summary className="flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-300 focus:outline-none">
+                    <span className="flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                      Reviewed & Acknowledged Warnings ({acknowledgedConflicts.length})
+                    </span>
+                    <span className="text-[9px] lowercase bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 group-open:hidden">
+                      click to expand history
+                    </span>
+                  </summary>
+                  <div className="mt-2.5 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-36 overflow-y-auto pr-1 scrollbar-thin">
+                    {acknowledgedConflicts.map((ack, index) => (
+                      <div 
+                        key={index}
+                        className="p-2.5 bg-slate-50/70 dark:bg-slate-900/40 rounded-lg border border-slate-200/50 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-300 flex items-start justify-between gap-2 shadow-2xs"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-700 dark:text-slate-300 line-through decoration-slate-400">
+                              {ack.drug} vs {ack.allergy}
+                            </span>
+                            <span className="text-[9px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-1 rounded font-medium">
+                              Resolved
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400">
+                            Reviewed on {ack.timestamp}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleReinstateConflict(ack.drug, ack.allergy)}
+                          className="px-2 py-0.5 rounded bg-slate-200/80 hover:bg-rose-100 text-slate-700 hover:text-rose-700 dark:bg-slate-800 dark:hover:bg-rose-950/40 dark:text-slate-400 dark:hover:text-rose-300 text-[10px] font-bold transition-colors cursor-pointer border border-slate-300/40"
+                          title="Reinstate this conflict warning as active"
+                        >
+                          Reinstate
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </div>
+            )}
+
+            {/* PERSISTENT CLINICAL NOTES SECTION */}
+            <div className="mt-3.5 pt-3.5 border-t border-slate-200/45 dark:border-slate-800/80 space-y-2.5">
+              <div className="flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-blue-500" />
+                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 dark:text-slate-400">Clinical Chart Notes & Justifications:</span>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                {/* Notes Input Controls */}
+                <div className="md:col-span-1 space-y-2">
+                  <textarea
+                    value={newClinicalNote}
+                    onChange={e => setNewClinicalNote(e.target.value)}
+                    placeholder="Append clinician annotation, clinical justification, or polypharmacy tolerance rationale..."
+                    className="w-full h-20 p-2.5 text-[11px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1.5 focus:ring-blue-400 transition-all resize-none shadow-2xs"
+                  />
+                  <button
+                    onClick={handleAddClinicalNote}
+                    className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold uppercase tracking-wider rounded-lg border border-blue-500 transition-colors cursor-pointer shadow-xs"
+                  >
+                    + Append Clinical Note
+                  </button>
+                </div>
+
+                {/* Notes List Feed */}
+                <div className="md:col-span-2 space-y-2 max-h-32 overflow-y-auto pr-1.5 scrollbar-thin">
+                  {clinicalNotes.length > 0 ? (
+                    clinicalNotes.map(note => (
+                      <div 
+                        key={note.id}
+                        className="p-2.5 bg-slate-50/50 dark:bg-slate-900/40 border border-slate-200/30 dark:border-slate-800/50 rounded-lg flex items-start justify-between gap-3 text-[11px] text-slate-700 dark:text-slate-300 shadow-2xs hover:border-slate-200 dark:hover:border-slate-700 transition-colors"
+                      >
+                        <div className="space-y-0.5 leading-relaxed">
+                          <p className="whitespace-pre-wrap">{note.content}</p>
+                          <p className="text-[9px] text-slate-400 font-semibold">
+                            Recorded on {note.timestamp}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteClinicalNote(note.id)}
+                          className="p-1 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-slate-450 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 rounded transition-colors cursor-pointer"
+                          title="Delete note"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center border border-dashed border-slate-200 dark:border-slate-800 rounded-lg p-5">
+                      <p className="text-[10.5px] text-slate-450 italic">No custom clinical notes recorded. Use the text box to document clinical justifications.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </motion.div>
           
           {/* TAB 1: MEDICAL DICTIONARY & INDEX */}
@@ -1856,6 +2376,7 @@ export default function App() {
                         setPatientWeight(weight);
                       }}
                       allergies={allergies}
+                      acknowledgedConflicts={acknowledgedConflicts}
                     />
 
                     {/* Clinical Records Section */}

@@ -64,6 +64,7 @@ export interface DrugInteractionGraphProps {
   patientWeight?: number;
   onPatientMetricsChange?: (metrics: { age: number; weight: number }) => void;
   allergies?: string[];
+  acknowledgedConflicts?: { drug: string; allergy: string }[];
 }
 
 // Comprehensive Drug Metadata Database
@@ -563,7 +564,8 @@ export function DrugInteractionGraph({
   patientAge = 72,
   patientWeight = 62,
   onPatientMetricsChange,
-  allergies = []
+  allergies = [],
+  acknowledgedConflicts = []
 }: DrugInteractionGraphProps) {
   // Patient Physiological Markers State
   const [age, setAge] = useState<number>(patientAge);
@@ -1269,31 +1271,34 @@ export function DrugInteractionGraph({
             let allergyConflict: string | null = null;
             for (const allergy of allergies) {
               const aLower = allergy.toLowerCase().trim();
+              let matchedConflictReason: string | null = null;
+              
               if (dLower === aLower || dLower.includes(aLower) || aLower.includes(dLower)) {
-                allergyConflict = `Direct conflict with patient's allergy to "${allergy}"`;
-                break;
-              }
-              if (aLower === "nsaid" || aLower === "nsaids") {
+                matchedConflictReason = `Direct conflict with patient's allergy to "${allergy}"`;
+              } else if (aLower === "nsaid" || aLower === "nsaids") {
                 if (NSAID_DRUGS.includes(dLower)) {
-                  allergyConflict = `Cross-sensitivity conflict: ${drug} is an NSAID`;
-                  break;
+                  matchedConflictReason = `Cross-sensitivity conflict: ${drug} is an NSAID`;
                 }
-              }
-              if (aLower === "ace inhibitor" || aLower === "ace inhibitors" || aLower === "acei" || aLower === "arb" || aLower === "arbs" || aLower === "lisinopril") {
+              } else if (aLower === "ace inhibitor" || aLower === "ace inhibitors" || aLower === "acei" || aLower === "arb" || aLower === "arbs" || aLower === "lisinopril") {
                 if (ACEI_DRUGS.includes(dLower)) {
-                  allergyConflict = `Cross-sensitivity conflict: ${drug} is an ACE Inhibitor / ARB`;
-                  break;
+                  matchedConflictReason = `Cross-sensitivity conflict: ${drug} is an ACE Inhibitor / ARB`;
                 }
-              }
-              if (aLower === "sulfa" || aLower === "sulfa drugs" || aLower === "sulfonamides") {
+              } else if (aLower === "sulfa" || aLower === "sulfa drugs" || aLower === "sulfonamides") {
                 if (dLower.includes("sulfa") || dLower === "furosemide" || dLower === "hydrochlorothiazide") {
-                  allergyConflict = `Cross-sensitivity conflict: ${drug} contains a cross-reactive sulfonamide chemical structure`;
-                  break;
+                  matchedConflictReason = `Cross-sensitivity conflict: ${drug} contains a cross-reactive sulfonamide chemical structure`;
+                }
+              } else if (aLower === "anticoagulants" || aLower === "anticoagulant" || aLower === "warfarin") {
+                if (ANTICOAGULANTS.includes(dLower)) {
+                  matchedConflictReason = `Cross-sensitivity conflict: ${drug} is an anticoagulant`;
                 }
               }
-              if (aLower === "anticoagulants" || aLower === "anticoagulant" || aLower === "warfarin") {
-                if (ANTICOAGULANTS.includes(dLower)) {
-                  allergyConflict = `Cross-sensitivity conflict: ${drug} is an anticoagulant`;
+              
+              if (matchedConflictReason) {
+                const isAcked = acknowledgedConflicts.some(
+                  ack => ack.drug.toLowerCase() === drug.toLowerCase() && ack.allergy.toLowerCase() === allergy.toLowerCase()
+                );
+                if (!isAcked) {
+                  allergyConflict = matchedConflictReason;
                   break;
                 }
               }
